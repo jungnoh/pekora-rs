@@ -1,0 +1,24 @@
+[package]
+name = "pekora-rs"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+tokio = { version = "1.36.0", features = ["full"] }
+anyhow = "1.0.80"
+log = "0.4.20"
+regex = { version = "1.10.3", features = [] }
+env_logger = "0.11.2"
+thiserror = "1.0.57"
+reqwest = { version = "0.11.24", features = ["json"] }
+chrono = { version = "0.4.34", features = ["serde"] }
+async-trait = "0.1.77"
+serde = { version = "1.0.197", features = ["derive"] }
+serde_json = { version = "1.0.114", features = [] }
+envy = "0.4.2"
+clap = { version = "4.5.1", features = ["derive", "env"] }
+casual = "0.2.0"
+axum = "0.7.4"
+lazy_static = "1.4.0"
