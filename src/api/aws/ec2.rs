@@ -1,22 +1,10 @@
+use crate::api::aws::util::{AwsClientError, AwsClientResult, MAJOR_REGIONS};
 use crate::util::ClientSet;
 use aws_config::{BehaviorVersion, SdkConfig};
-use aws_sdk_ec2::error::SdkError;
-use aws_sdk_ec2::operation::describe_instance_types::DescribeInstanceTypesError;
 use aws_sdk_ec2::types::InstanceTypeInfo;
-use lazy_static::lazy_static;
 use log::info;
 use std::collections::HashMap;
 use std::sync::Arc;
-
-lazy_static! {
-    static ref MAJOR_REGIONS: [&'static str; 5] = [
-        "us-west-2",
-        "us-east-1",
-        "us-east-2",
-        "ap-northeast-1",
-        "eu-central-1"
-    ];
-}
 
 async fn build_client_set(
     aws_sdk_config: Option<SdkConfig>,
@@ -49,38 +37,28 @@ impl Ec2Client {
 
     pub async fn describe_all_instance_types(
         &self,
-    ) -> Ec2ClientResult<HashMap<String, InstanceTypeInfo>> {
+    ) -> AwsClientResult<HashMap<String, InstanceTypeInfo>> {
         let mut tasks = Vec::with_capacity(MAJOR_REGIONS.len());
         for region in MAJOR_REGIONS.iter() {
             let client = self.client_set.get(region).await;
-            tasks.push(tokio::spawn(describe_instance_types(client, region, None)));
+            tasks.push(tokio::spawn(describe_instance_types(client, None)));
         }
 
         let mut result_map = HashMap::new();
         for task_handle in tasks {
-            let instance_types = task_handle.await.map_err(Ec2ClientError::Tokio)??;
+            let instance_types = task_handle.await.map_err(AwsClientError::Tokio)??;
             for (k, v) in instance_types {
                 result_map.entry(k).or_insert(v);
             }
         }
         Ok(result_map)
     }
-
-    pub async fn describe_instance_types(
-        &self,
-        region: &str,
-        instance_types: Option<Vec<String>>,
-    ) -> Ec2ClientResult<HashMap<String, InstanceTypeInfo>> {
-        let client = self.client_set.get(region).await;
-        describe_instance_types(client, region, instance_types).await
-    }
 }
 
 async fn describe_instance_types(
     client: Arc<aws_sdk_ec2::Client>,
-    region: &str,
     instance_types: Option<Vec<String>>,
-) -> Ec2ClientResult<HashMap<String, InstanceTypeInfo>> {
+) -> AwsClientResult<HashMap<String, InstanceTypeInfo>> {
     let mut request = client.describe_instance_types();
 
     if let Some(instance_types) = instance_types {
@@ -96,14 +74,14 @@ async fn describe_instance_types(
     loop {
         info!(
             "Ec2Client: Requesting DescribeInstanceTypes (region={:?})",
-            region
+            client.config().region(),
         );
         let result = request
             .clone()
             .set_next_token(next_token.clone())
             .send()
             .await
-            .map_err(Ec2ClientError::DescribeInstanceTypesFailure)?;
+            .map_err(AwsClientError::DescribeInstanceTypesFailure)?;
         next_token = result.next_token;
         if result.instance_types.is_none() {
             break;
@@ -111,7 +89,7 @@ async fn describe_instance_types(
         let instance_types = result.instance_types.unwrap();
         info!(
             "Ec2Client: Found DescribeInstanceTypes (region={:?}, count={})",
-            region,
+            client.config().region(),
             instance_types.len()
         );
         for ref item in instance_types {
@@ -124,14 +102,4 @@ async fn describe_instance_types(
         }
     }
     Ok(result_map)
-}
-
-pub type Ec2ClientResult<T> = Result<T, Ec2ClientError>;
-
-#[derive(thiserror::Error, Debug)]
-pub enum Ec2ClientError {
-    #[error("AWS DescribeInstanceTypes failed: {0}")]
-    DescribeInstanceTypesFailure(#[from] SdkError<DescribeInstanceTypesError>),
-    #[error("Tokio thread error: {0}")]
-    Tokio(#[from] tokio::task::JoinError),
 }
