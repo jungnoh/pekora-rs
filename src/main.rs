@@ -2,6 +2,7 @@ mod api;
 mod util;
 
 use crate::api::aws::ec2::Ec2Client;
+use crate::api::aws::elasticache::ElasticacheClient;
 use crate::api::aws::price_bulk::PriceBulkClient;
 use crate::api::aws::price_bulk_types::{PriceBulkOffer, PriceBulkSavingsPlan};
 use clap::{Parser, Subcommand};
@@ -44,7 +45,9 @@ pub enum TestCommands {
         #[arg(long, default_value = "ap-northeast-1")]
         region: String,
     },
-    AllInstanceTypes,
+    Ec2AllInstanceTypes,
+    RedisTypeSpecificParameters,
+    MemcachedTypeSpecificParameters,
 }
 
 async fn main_test_command(cmd: &TestCommands) {
@@ -90,9 +93,19 @@ async fn main_test_command(cmd: &TestCommands) {
                 .await;
             println!("{:?}", response);
         }
-        TestCommands::AllInstanceTypes => {
+        TestCommands::Ec2AllInstanceTypes => {
             let ec2_client = Ec2Client::new(None).await;
             let response = ec2_client.describe_all_instance_types().await;
+            println!("{:?}", response);
+        }
+        TestCommands::RedisTypeSpecificParameters => {
+            let client = ElasticacheClient::new(None).await;
+            let response = client.list_redis_type_specific_parameters().await;
+            println!("{:?}", response);
+        }
+        TestCommands::MemcachedTypeSpecificParameters => {
+            let client = ElasticacheClient::new(None).await;
+            let response = client.list_memcached_type_specific_parameters().await;
             println!("{:?}", response);
         }
     }
