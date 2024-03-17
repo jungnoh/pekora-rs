@@ -1,6 +1,7 @@
 mod api;
 mod util;
 
+use crate::api::aws::ec2::Ec2Client;
 use crate::api::aws::price_bulk::PriceBulkClient;
 use crate::api::aws::price_bulk_types::{PriceBulkOffer, PriceBulkSavingsPlan};
 use clap::{Parser, Subcommand};
@@ -43,6 +44,7 @@ pub enum TestCommands {
         #[arg(long, default_value = "ap-northeast-1")]
         region: String,
     },
+    AllInstanceTypes,
 }
 
 async fn main_test_command(cmd: &TestCommands) {
@@ -86,6 +88,11 @@ async fn main_test_command(cmd: &TestCommands) {
                     filename: "index.json".to_string(),
                 })
                 .await;
+            println!("{:?}", response);
+        }
+        TestCommands::AllInstanceTypes => {
+            let ec2_client = Ec2Client::new(None).await;
+            let response = ec2_client.describe_all_instance_types().await;
             println!("{:?}", response);
         }
     }
