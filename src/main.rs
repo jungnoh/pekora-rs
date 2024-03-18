@@ -1,4 +1,5 @@
 mod api;
+mod cache;
 mod util;
 
 use crate::api::aws::ec2::Ec2Client;
