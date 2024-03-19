@@ -18,7 +18,7 @@ pub struct FileBackedCacheableBuilder {
 
 impl FileBackedCacheableBuilder {
     pub fn new(cache_directory: Option<String>, cache_max_age: Option<chrono::Duration>) -> Self {
-        let cache_directory = cache_directory.unwrap_or("cache".to_string());
+        let cache_directory = cache_directory.unwrap_or("cached".to_string());
         let cache_max_age = cache_max_age.unwrap_or(chrono::Duration::try_days(7).unwrap());
 
         Self {
