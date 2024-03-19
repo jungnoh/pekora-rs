@@ -1,4 +1,5 @@
-use async_trait::async_trait;
+use crate::cache::{CacheKey, CacheLoadResult, CacheableArc};
+use chrono::{TimeZone, Utc};
 use log::{debug, warn};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -7,45 +8,59 @@ use std::fs::File;
 use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::UNIX_EPOCH;
 use tokio::fs;
 
-#[derive(Debug, Clone)]
-pub struct CacheKey {
-    pub content_key: Option<String>,
-    pub content_hash: Option<String>,
+pub struct FileBackedCacheableBuilder {
+    cache_directory: Arc<PathBuf>,
+    cache_max_age: chrono::Duration,
 }
 
-#[async_trait]
-pub trait Cacheable<I, O: Serialize + DeserializeOwned + Send + Sync, E: Error> {
-    async fn get_cache_key(&self, input: &I) -> Result<CacheKey, E>;
-    async fn load(&self, input: &I) -> Result<O, E>;
-    fn category_key(&self) -> String;
-}
+impl FileBackedCacheableBuilder {
+    pub fn new(cache_directory: Option<String>, cache_max_age: Option<chrono::Duration>) -> Self {
+        let cache_directory = cache_directory.unwrap_or("cache".to_string());
+        let cache_max_age = cache_max_age.unwrap_or(chrono::Duration::try_days(7).unwrap());
 
-#[derive(Debug)]
-pub struct CacheLoadResult<O> {
-    pub result: O,
-    pub cache_key: CacheKey,
-    pub cache_hit: bool,
-}
+        Self {
+            cache_directory: Arc::new(PathBuf::from(Path::new(&cache_directory))),
+            cache_max_age,
+        }
+    }
 
-pub type CacheableArc<I, O, E> = Arc<Box<dyn Cacheable<I, O, E> + Send + Sync>>;
+    pub fn build<I: Send + Sync, O: Serialize + DeserializeOwned + Send + Sync, E: Error>(
+        self,
+        cacheable: CacheableArc<I, O, E>,
+    ) -> FileBackedCacheable<I, O, E> {
+        FileBackedCacheable::new(
+            cacheable,
+            self.cache_max_age,
+            self.cache_directory
+                .clone()
+                .to_str()
+                .unwrap_or("")
+                .to_string(),
+        )
+    }
+}
 
 pub struct FileBackedCacheable<I: Send + Sync, O: Serialize + DeserializeOwned + Send + Sync, E> {
     cache_directory: Arc<PathBuf>,
     cacheable: CacheableArc<I, O, E>,
-
+    cache_max_age: chrono::Duration,
 }
 
 impl<I: Send + Sync, O: Serialize + DeserializeOwned + Send + Sync, E: Error>
     FileBackedCacheable<I, O, E>
 {
-    pub fn new(cacheable: CacheableArc<I, O, E>, root_path: Option<String>) -> Self {
-        let cache_directory =
-            Path::new(&root_path.unwrap_or("cache".to_string())).join(cacheable.category_key());
+    pub fn new(
+        cacheable: CacheableArc<I, O, E>,
+        cache_max_age: chrono::Duration,
+        root_path: String,
+    ) -> Self {
         Self {
             cacheable,
-            cache_directory: Arc::new(cache_directory),
+            cache_max_age,
+            cache_directory: Arc::new(PathBuf::from(Path::new(&root_path))),
         }
     }
 
@@ -95,6 +110,24 @@ impl<I: Send + Sync, O: Serialize + DeserializeOwned + Send + Sync, E: Error>
             }
         };
 
+        match file.metadata() {
+            Ok(metadata) => {
+                let modified = metadata.modified().map_err(CacheError::IO)?;
+                let now = chrono::Utc::now();
+
+                let modified_epoch = modified.duration_since(UNIX_EPOCH).unwrap().as_secs();
+                let modified = Utc.timestamp_opt(modified_epoch as i64, 0).unwrap();
+                let age = now.signed_duration_since(modified);
+                if age > self.cache_max_age {
+                    debug!("Cache expired: {:?}", cache_key);
+                    return Ok(None);
+                }
+            }
+            Err(e) => {
+                return Err(CacheError::IO(e));
+            }
+        }
+
         let reader = BufReader::new(file);
         let result: serde_json::Result<O> = serde_json::from_reader(reader);
         match result {
@@ -109,12 +142,15 @@ impl<I: Send + Sync, O: Serialize + DeserializeOwned + Send + Sync, E: Error>
         }
     }
 
-    async fn get_usable_cache_file(&self, cache_key: &CacheKey) -> Result<Option<PathBuf>, CacheError<E>> {
-        let cache_path = self.cache_directory.join(self.build_cache_filename(cache_key));
-        return match File::open(&cache_path) {
-            Ok(_) => {
-                Ok(Some(cache_path))
-            },
+    async fn get_usable_cache_file(
+        &self,
+        cache_key: &CacheKey,
+    ) -> Result<Option<PathBuf>, CacheError<E>> {
+        let cache_path = self
+            .cache_directory
+            .join(self.build_cache_filename(cache_key));
+        match File::open(&cache_path) {
+            Ok(_) => Ok(Some(cache_path)),
             Err(e) => {
                 if e.kind() == std::io::ErrorKind::NotFound {
                     return Ok(None);
@@ -125,10 +161,12 @@ impl<I: Send + Sync, O: Serialize + DeserializeOwned + Send + Sync, E: Error>
     }
 
     async fn write_cache(&self, cache_key: &CacheKey, result: &O) -> Result<(), CacheError<E>> {
-        let cache_path = self.cache_directory.join(self.build_cache_filename(cache_key));
-        fs::create_dir_all(&self.cache_directory.clone().as_path())
-            .await
-            .map_err(CacheError::IO)?;
+        let cache_path = self
+            .cache_directory
+            .join(self.build_cache_filename(cache_key));
+        if let Some(folder) = cache_path.parent() {
+            fs::create_dir_all(folder).await.map_err(CacheError::IO)?;
+        }
 
         // TODO: Use tokio
         let file = std::fs::OpenOptions::new()
@@ -143,22 +181,19 @@ impl<I: Send + Sync, O: Serialize + DeserializeOwned + Send + Sync, E: Error>
     }
 
     fn build_cache_filename(&self, cache_key: &CacheKey) -> String {
-        match &cache_key.content_key {
-            None => {
-                match cache_key.content_hash {
-                    Some(ref hash) => format!("_{}", hash),
-                    None => {
-                        panic!("Cache key must have a content key or hash. This is a bug.");
-                    }
+        let filename = match &cache_key.content_key {
+            None => match cache_key.content_hash {
+                Some(ref hash) => format!("_{}", hash),
+                None => {
+                    panic!("Cache key must have a content key or hash. This is a bug.");
                 }
-            }
-            Some(content_key) => {
-                match cache_key.content_hash {
-                    Some(ref hash) => format!("{}_{}", content_key, hash),
-                    None => format!("{}_", content_key),
-                }
-            }
-        }
+            },
+            Some(content_key) => match cache_key.content_hash {
+                Some(ref hash) => format!("{}_{}", content_key, hash),
+                None => format!("{}_", content_key),
+            },
+        };
+        format!("{}/{}.json", self.cacheable.category_key(), filename)
     }
 }
 
@@ -174,7 +209,7 @@ pub enum CacheError<E: Error> {
 
 #[cfg(test)]
 mod tests {
-    use crate::cache::file_backed::Cacheable;
+    use crate::cache::Cacheable;
     use serde::{Deserialize, Serialize};
     use std::sync::Arc;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -223,7 +258,8 @@ mod tests {
 
         let cacheable = super::FileBackedCacheable::new(
             Arc::new(Box::new(TestCacheable)),
-            Some("test_cache".to_string()),
+            chrono::Duration::try_days(1).unwrap(),
+            "test_cache".to_string(),
         );
         let result = cacheable.load(&cache_key.to_string()).await.unwrap();
         assert_eq!(result.result.a, cache_key);

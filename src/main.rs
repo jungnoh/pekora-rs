@@ -8,7 +8,7 @@ use crate::api::aws::price_bulk::{
     PricingListClient, RegionIndexClient, SavingsPlanListClient, ServiceIndexClient,
 };
 use crate::api::aws::price_bulk_types::{PriceBulkOffer, PriceBulkSavingsPlan};
-use crate::cache::FileBackedCacheable;
+use crate::cache::FileBackedCacheableBuilder;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser, Debug, Clone)]
@@ -56,17 +56,17 @@ pub enum TestCommands {
 
 async fn main_test_command(cmd: &TestCommands) {
     let client = reqwest::Client::new();
-    // let price_bulk_client = PriceBulkClient::new(client);
+    let cacheable_builder = FileBackedCacheableBuilder::new(None, None);
 
     match cmd {
         TestCommands::ServiceList {} => {
             let cached =
-                FileBackedCacheable::new(ServiceIndexClient::new_cacheable_arc(client, None), None);
+                cacheable_builder.build(ServiceIndexClient::new_cacheable_arc(client, None));
             println!("{:?}", cached.load(&()).await.unwrap());
         }
         TestCommands::RegionIndex { service } => {
             let cached =
-                FileBackedCacheable::new(RegionIndexClient::new_cacheable_arc(client, None), None);
+                cacheable_builder.build(RegionIndexClient::new_cacheable_arc(client, None));
             println!("{:?}", cached.load(&service.to_string()).await.unwrap());
         }
         TestCommands::PricingList {
@@ -75,7 +75,7 @@ async fn main_test_command(cmd: &TestCommands) {
             version,
         } => {
             let cached =
-                FileBackedCacheable::new(PricingListClient::new_cacheable_arc(client, None), None);
+                cacheable_builder.build(PricingListClient::new_cacheable_arc(client, None));
             let response = cached
                 .load(&PriceBulkOffer {
                     region: region.clone(),
@@ -91,10 +91,8 @@ async fn main_test_command(cmd: &TestCommands) {
             version,
             region,
         } => {
-            let cached = FileBackedCacheable::new(
-                SavingsPlanListClient::new_cacheable_arc(client, None),
-                None,
-            );
+            let cached =
+                cacheable_builder.build(SavingsPlanListClient::new_cacheable_arc(client, None));
             let response = cached
                 .load(&PriceBulkSavingsPlan {
                     region: region.clone(),
