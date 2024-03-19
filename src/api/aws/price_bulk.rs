@@ -1,5 +1,5 @@
 use crate::api::aws::price_bulk_types::*;
-use crate::cache::{Cacheable, CacheableArc};
+use crate::cache::{Cacheable, CacheableArc, CacheKey};
 use async_trait::async_trait;
 use log::debug;
 use std::sync::Arc;
@@ -13,9 +13,13 @@ pub struct ServiceIndexClient {
 
 #[async_trait]
 impl Cacheable<(), ServiceListResponse, PriceBulkError> for ServiceIndexClient {
-    async fn get_cache_key(&self, _input: &()) -> Result<Option<String>, PriceBulkError> {
+    async fn get_cache_key(&self, _input: &()) -> Result<CacheKey, PriceBulkError> {
         let request_url = self.request_url();
-        load_etag(self.client.clone(), request_url.as_str()).await
+        let content_hash = load_etag(self.client.clone(), request_url.as_str()).await?;
+        Ok(CacheKey {
+            content_key: None,
+            content_hash,
+        })
     }
 
     async fn load(&self, _input: &()) -> Result<ServiceListResponse, PriceBulkError> {
@@ -53,13 +57,17 @@ pub struct RegionIndexClient {
 
 #[async_trait]
 impl Cacheable<String, RegionIndexResponse, PriceBulkError> for RegionIndexClient {
-    async fn get_cache_key(&self, input: &String) -> Result<Option<String>, PriceBulkError> {
-        let request_url = self.request_url(input);
-        load_etag(self.client.clone(), request_url.as_str()).await
+    async fn get_cache_key(&self, service_code: &String) -> Result<CacheKey, PriceBulkError> {
+        let request_url = self.request_url(service_code);
+        let content_hash = load_etag(self.client.clone(), request_url.as_str()).await?;
+        Ok(CacheKey {
+            content_key: Some(service_code.clone()),
+            content_hash,
+        })
     }
 
-    async fn load(&self, input: &String) -> Result<RegionIndexResponse, PriceBulkError> {
-        let request_url = self.request_url(input);
+    async fn load(&self, service_code: &String) -> Result<RegionIndexResponse, PriceBulkError> {
+        let request_url = self.request_url(service_code);
         let response = send_request(self.client.clone(), request_url.as_str()).await?;
         Ok(response.json::<RegionIndexResponse>().await?)
     }
@@ -99,12 +107,12 @@ impl Cacheable<PriceBulkOffer, PricingListResponse, PriceBulkError> for PricingL
     async fn get_cache_key(
         &self,
         input: &PriceBulkOffer,
-    ) -> Result<Option<String>, PriceBulkError> {
+    ) -> Result<CacheKey, PriceBulkError> {
         let request_url = format!("{}/{}", self.base_url, input.path());
-        Ok(build_cache_key(
-            input.tag(),
-            load_etag(self.client.clone(), request_url.as_str()).await?,
-        ))
+        Ok(CacheKey {
+            content_key: Some(input.tag()),
+            content_hash: load_etag( self.client.clone(), request_url.as_str()).await?,
+        })
     }
 
     async fn load(&self, input: &PriceBulkOffer) -> Result<PricingListResponse, PriceBulkError> {
@@ -143,12 +151,12 @@ impl Cacheable<PriceBulkSavingsPlan, SavingsPlanListResponse, PriceBulkError>
     async fn get_cache_key(
         &self,
         input: &PriceBulkSavingsPlan,
-    ) -> Result<Option<String>, PriceBulkError> {
+    ) -> Result<CacheKey, PriceBulkError> {
         let request_url = format!("{}/{}", self.base_url, input.path());
-        Ok(build_cache_key(
-            input.tag(),
-            load_etag(self.client.clone(), request_url.as_str()).await?,
-        ))
+        Ok(CacheKey {
+            content_key: Some(input.tag()),
+            content_hash: load_etag( self.client.clone(), request_url.as_str()).await?,
+        })
     }
 
     async fn load(
@@ -176,10 +184,6 @@ impl SavingsPlanListClient {
         };
         Arc::new(Box::new(instance))
     }
-}
-
-fn build_cache_key(content_key: String, content_hash: Option<String>) -> Option<String> {
-    content_hash.map(|hash| format!("{}-{}", content_key, hash))
 }
 
 async fn load_etag(client: reqwest::Client, url: &str) -> Result<Option<String>, PriceBulkError> {

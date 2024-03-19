@@ -9,9 +9,15 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::fs;
 
+#[derive(Debug, Clone)]
+pub struct CacheKey {
+    pub content_key: Option<String>,
+    pub content_hash: Option<String>,
+}
+
 #[async_trait]
 pub trait Cacheable<I, O: Serialize + DeserializeOwned + Send + Sync, E: Error> {
-    async fn get_cache_key(&self, input: &I) -> Result<Option<String>, E>;
+    async fn get_cache_key(&self, input: &I) -> Result<CacheKey, E>;
     async fn load(&self, input: &I) -> Result<O, E>;
     fn category_key(&self) -> String;
 }
@@ -19,7 +25,7 @@ pub trait Cacheable<I, O: Serialize + DeserializeOwned + Send + Sync, E: Error> 
 #[derive(Debug)]
 pub struct CacheLoadResult<O> {
     pub result: O,
-    pub cache_key: Option<String>,
+    pub cache_key: CacheKey,
     pub cache_hit: bool,
 }
 
@@ -28,6 +34,7 @@ pub type CacheableArc<I, O, E> = Arc<Box<dyn Cacheable<I, O, E> + Send + Sync>>;
 pub struct FileBackedCacheable<I: Send + Sync, O: Serialize + DeserializeOwned + Send + Sync, E> {
     cache_directory: Arc<PathBuf>,
     cacheable: CacheableArc<I, O, E>,
+
 }
 
 impl<I: Send + Sync, O: Serialize + DeserializeOwned + Send + Sync, E: Error>
@@ -49,17 +56,15 @@ impl<I: Send + Sync, O: Serialize + DeserializeOwned + Send + Sync, E: Error>
             .await
             .map_err(CacheError::FetchFailed)?;
         debug!("Cache key: {:?}", cache_key);
-        if let Some(cache_key) = &cache_key {
-            if let Some(result) = self.test_cache(cache_key.clone()).await? {
-                debug!("Cache hit: {:?}", cache_key);
-                return Ok(CacheLoadResult {
-                    result,
-                    cache_key: Some(cache_key.clone()),
-                    cache_hit: true,
-                });
-            } else {
-                debug!("Cache miss: {:?}", cache_key);
-            }
+        if let Some(result) = self.test_cache(&cache_key).await? {
+            debug!("Cache hit: {:?}", cache_key);
+            return Ok(CacheLoadResult {
+                result,
+                cache_key: cache_key.clone(),
+                cache_hit: true,
+            });
+        } else {
+            debug!("Cache miss: {:?}", cache_key);
         }
 
         let result = self
@@ -67,10 +72,9 @@ impl<I: Send + Sync, O: Serialize + DeserializeOwned + Send + Sync, E: Error>
             .load(input)
             .await
             .map_err(CacheError::FetchFailed)?;
-        if let Some(cache_key) = &cache_key {
-            debug!("Writing cache: {:?}", cache_key);
-            self.write_cache(cache_key, &result).await?;
-        }
+
+        debug!("Writing cache: {:?}", cache_key);
+        self.write_cache(&cache_key, &result).await?;
         Ok(CacheLoadResult {
             result,
             cache_key,
@@ -78,16 +82,15 @@ impl<I: Send + Sync, O: Serialize + DeserializeOwned + Send + Sync, E: Error>
         })
     }
 
-    async fn test_cache(&self, cache_key: String) -> Result<Option<O>, CacheError<E>> {
-        let cache_path = self.cache_directory.join(cache_key);
+    async fn test_cache(&self, cache_key: &CacheKey) -> Result<Option<O>, CacheError<E>> {
+        let usable_file = match self.get_usable_cache_file(cache_key).await? {
+            Some(file) => file,
+            None => return Ok(None),
+        };
 
-        // TODO: Use tokio
-        let file = match File::open(cache_path) {
+        let file = match File::open(usable_file) {
             Ok(file) => file,
             Err(e) => {
-                if e.kind() == std::io::ErrorKind::NotFound {
-                    return Ok(None);
-                }
                 return Err(CacheError::IO(e));
             }
         };
@@ -106,12 +109,26 @@ impl<I: Send + Sync, O: Serialize + DeserializeOwned + Send + Sync, E: Error>
         }
     }
 
-    async fn write_cache(&self, cache_key: &str, result: &O) -> Result<(), CacheError<E>> {
+    async fn get_usable_cache_file(&self, cache_key: &CacheKey) -> Result<Option<PathBuf>, CacheError<E>> {
+        let cache_path = self.cache_directory.join(self.build_cache_filename(cache_key));
+        return match File::open(&cache_path) {
+            Ok(_) => {
+                Ok(Some(cache_path))
+            },
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    return Ok(None);
+                }
+                Err(CacheError::IO(e))
+            }
+        }
+    }
+
+    async fn write_cache(&self, cache_key: &CacheKey, result: &O) -> Result<(), CacheError<E>> {
+        let cache_path = self.cache_directory.join(self.build_cache_filename(cache_key));
         fs::create_dir_all(&self.cache_directory.clone().as_path())
             .await
             .map_err(CacheError::IO)?;
-
-        let cache_path = self.cache_directory.join(cache_key);
 
         // TODO: Use tokio
         let file = std::fs::OpenOptions::new()
@@ -123,6 +140,25 @@ impl<I: Send + Sync, O: Serialize + DeserializeOwned + Send + Sync, E: Error>
         let writer = BufWriter::new(file);
         serde_json::to_writer(writer, result).map_err(CacheError::Serde)?;
         Ok(())
+    }
+
+    fn build_cache_filename(&self, cache_key: &CacheKey) -> String {
+        match &cache_key.content_key {
+            None => {
+                match cache_key.content_hash {
+                    Some(ref hash) => format!("_{}", hash),
+                    None => {
+                        panic!("Cache key must have a content key or hash. This is a bug.");
+                    }
+                }
+            }
+            Some(content_key) => {
+                match cache_key.content_hash {
+                    Some(ref hash) => format!("{}_{}", content_key, hash),
+                    None => format!("{}_", content_key),
+                }
+            }
+        }
     }
 }
 
