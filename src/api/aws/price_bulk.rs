@@ -1,5 +1,5 @@
 use crate::api::aws::price_bulk_types::*;
-use crate::cache::{Cacheable, CacheableArc, CacheKey};
+use crate::cache::{CacheKey, Cacheable, CacheableArc};
 use async_trait::async_trait;
 use log::debug;
 use std::sync::Arc;
@@ -104,14 +104,11 @@ pub struct PricingListClient {
 
 #[async_trait]
 impl Cacheable<PriceBulkOffer, PricingListResponse, PriceBulkError> for PricingListClient {
-    async fn get_cache_key(
-        &self,
-        input: &PriceBulkOffer,
-    ) -> Result<CacheKey, PriceBulkError> {
+    async fn get_cache_key(&self, input: &PriceBulkOffer) -> Result<CacheKey, PriceBulkError> {
         let request_url = format!("{}/{}", self.base_url, input.path());
         Ok(CacheKey {
             content_key: Some(input.tag()),
-            content_hash: load_etag( self.client.clone(), request_url.as_str()).await?,
+            content_hash: load_etag(self.client.clone(), request_url.as_str()).await?,
         })
     }
 
@@ -155,7 +152,7 @@ impl Cacheable<PriceBulkSavingsPlan, SavingsPlanListResponse, PriceBulkError>
         let request_url = format!("{}/{}", self.base_url, input.path());
         Ok(CacheKey {
             content_key: Some(input.tag()),
-            content_hash: load_etag( self.client.clone(), request_url.as_str()).await?,
+            content_hash: load_etag(self.client.clone(), request_url.as_str()).await?,
         })
     }
 
