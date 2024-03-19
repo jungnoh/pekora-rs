@@ -4,7 +4,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::error::Error;
 use std::fs::File;
-use std::io::{BufReader, BufWriter, Write};
+use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::fs;
@@ -16,6 +16,7 @@ pub trait Cacheable<I, O: Serialize + DeserializeOwned + Send + Sync, E: Error> 
     fn category_key(&self) -> String;
 }
 
+#[derive(Debug)]
 pub struct CacheLoadResult<O> {
     pub result: O,
     pub cache_key: Option<String>,
@@ -32,8 +33,9 @@ pub struct FileBackedCacheable<I: Send + Sync, O: Serialize + DeserializeOwned +
 impl<I: Send + Sync, O: Serialize + DeserializeOwned + Send + Sync, E: Error>
     FileBackedCacheable<I, O, E>
 {
-    pub fn new(cacheable: CacheableArc<I, O, E>, root_path: String) -> Self {
-        let cache_directory = Path::new(&root_path).join(cacheable.category_key());
+    pub fn new(cacheable: CacheableArc<I, O, E>, root_path: Option<String>) -> Self {
+        let cache_directory =
+            Path::new(&root_path.unwrap_or("cache".to_string())).join(cacheable.category_key());
         Self {
             cacheable,
             cache_directory: Arc::new(cache_directory),
@@ -95,7 +97,10 @@ impl<I: Send + Sync, O: Serialize + DeserializeOwned + Send + Sync, E: Error>
         match result {
             Ok(result) => Ok(Some(result)),
             Err(e) => {
-                warn!("Cache deserialization failed, continuing as cache miss: {:?}", e);
+                warn!(
+                    "Cache deserialization failed, continuing as cache miss: {:?}",
+                    e
+                );
                 Ok(None)
             }
         }
@@ -147,9 +152,7 @@ mod tests {
     struct TestCacheable;
 
     #[async_trait::async_trait]
-    impl Cacheable<String, TestObject, super::CacheError<std::convert::Infallible>>
-        for TestCacheable
-    {
+    impl Cacheable<String, TestObject, super::CacheError<std::convert::Infallible>> for TestCacheable {
         async fn get_cache_key(
             &self,
             input: &String,
@@ -174,22 +177,34 @@ mod tests {
 
     #[tokio::test]
     async fn test_file_backed_cacheable() {
-        let cache_key = format!("test-{}", SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros());
+        let cache_key = format!(
+            "test-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_micros()
+        );
 
         let cacheable = super::FileBackedCacheable::new(
             Arc::new(Box::new(TestCacheable)),
-            "test_cache".to_string(),
+            Some("test_cache".to_string()),
         );
         let result = cacheable.load(&cache_key.to_string()).await.unwrap();
         assert_eq!(result.result.a, cache_key);
         assert_eq!(result.result.b, 42);
-        assert_eq!(result.cache_key, Some(format!("{}-key", cache_key).to_string()));
+        assert_eq!(
+            result.cache_key,
+            Some(format!("{}-key", cache_key).to_string())
+        );
         assert_eq!(result.cache_hit, false);
 
         let result = cacheable.load(&cache_key.to_string()).await.unwrap();
         assert_eq!(result.result.a, cache_key);
         assert_eq!(result.result.b, 42);
-        assert_eq!(result.cache_key, Some(format!("{}-key", cache_key).to_string()));
+        assert_eq!(
+            result.cache_key,
+            Some(format!("{}-key", cache_key).to_string())
+        );
         assert_eq!(result.cache_hit, true);
     }
 }

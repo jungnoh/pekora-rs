@@ -1,9 +1,9 @@
 use chrono::{DateTime, Utc};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Debug;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum ContractLength {
     #[serde(alias = "1yr", alias = "1 yr")]
     OneYear,
@@ -12,7 +12,7 @@ pub enum ContractLength {
 }
 
 #[allow(clippy::enum_variant_names)]
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum PurchaseOption {
     #[serde(alias = "No Upfront")]
     NoUpfront,
@@ -22,21 +22,21 @@ pub enum PurchaseOption {
     AllUpfront,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum RIOfferingClass {
     Standard,
     Convertible,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum Currency {
     #[allow(clippy::upper_case_acronyms)]
     USD,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PriceOffering<TA: Debug + Clone> {
     pub offer_term_code: String,
@@ -46,7 +46,7 @@ pub struct PriceOffering<TA: Debug + Clone> {
     pub term_attributes: TA,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PriceDimension {
     pub rate_code: String,
@@ -55,7 +55,7 @@ pub struct PriceDimension {
     pub price_per_unit: HashMap<String, String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RITermAttributes {
     #[serde(rename = "LeaseContractLength")]
     pub lease_contract_length: ContractLength,
@@ -65,7 +65,7 @@ pub struct RITermAttributes {
     pub purchase_option: PurchaseOption,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SavingPlanProduct {
     pub sku: String,
@@ -76,7 +76,7 @@ pub struct SavingPlanProduct {
     pub attributes: SavingsPlanProductAttributes,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SavingsPlanProductAttributes {
     pub purchase_option: PurchaseOption,
@@ -91,13 +91,13 @@ pub struct SavingsPlanProductAttributes {
     pub usage_type: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SavingsPlanTerms {
     pub savings_plan: Vec<SavingsPlanTerm>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SavingsPlanTerm {
     pub sku: String,
@@ -107,13 +107,13 @@ pub struct SavingsPlanTerm {
     pub rates: Vec<SavingsPlanTermRate>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct LeaseContractLength {
     pub duration: i32,
     pub unit: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SavingsPlanTermRate {
     pub discounted_sku: String,
@@ -125,7 +125,7 @@ pub struct SavingsPlanTermRate {
     pub discounted_rate: DiscountedRate,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct DiscountedRate {
     pub price: String,
     pub currency: Currency,

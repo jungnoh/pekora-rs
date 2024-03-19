@@ -5,11 +5,11 @@ use crate::util::regex_extract_match_group;
 use chrono::{DateTime, Utc};
 use lazy_static::lazy_static;
 use regex::Regex;
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
 use std::fmt::Debug;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ServiceListResponse {
     pub format_version: String,
@@ -17,7 +17,7 @@ pub struct ServiceListResponse {
     pub offers: HashMap<String, ServiceListResponseOffer>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ServiceListResponseOffer {
     pub offer_code: String,
@@ -28,7 +28,7 @@ pub struct ServiceListResponseOffer {
     pub current_savings_plan_index_url: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RegionIndexResponse {
     pub format_version: String,
@@ -36,14 +36,14 @@ pub struct RegionIndexResponse {
     pub regions: HashMap<String, RegionIndexResponseRegion>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RegionIndexResponseRegion {
     pub region_code: String,
     pub current_version_url: PriceBulkOffer,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProductResponse<PT: Debug + Clone, TT: Debug + Clone> {
     pub format_version: String,
@@ -60,7 +60,7 @@ pub type PricingListResponse = ProductResponse<
 
 pub type SavingsPlanListResponse = ProductResponse<Vec<SavingPlanProduct>, SavingsPlanTerms>;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PricingListResponseProduct<T: Debug + Clone> {
     pub product_family: String,
@@ -68,7 +68,7 @@ pub struct PricingListResponseProduct<T: Debug + Clone> {
     pub attributes: T,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PricingListResponseTerms {
     #[serde(rename = "OnDemand")]
     pub on_demand: HashMap<String, HashMap<String, PriceOffering<HashMap<String, String>>>>,
@@ -82,7 +82,7 @@ lazy_static! {
         Regex::new(r"^\/([^/]+)\/v1.0\/aws\/([^/]+)\/([^/]+)\/([^/]+)\/([^/]+)$").unwrap();
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct PriceBulkOffer {
     pub service_code: String,
     pub offer_version: String,
@@ -95,6 +95,13 @@ impl PriceBulkOffer {
         format!(
             "offers/v1.0/aws/{}/{}/{}/{}",
             self.service_code, self.offer_version, self.region, self.filename
+        )
+    }
+
+    pub fn tag(&self) -> String {
+        format!(
+            "{}-{}-{}",
+            self.region, self.service_code, self.offer_version,
         )
     }
 }
@@ -140,6 +147,13 @@ pub struct PriceBulkSavingsPlan {
 }
 
 impl PriceBulkSavingsPlan {
+    pub fn tag(&self) -> String {
+        format!(
+            "{}-{}-{}",
+            self.region, self.service_code, self.offer_version,
+        )
+    }
+
     pub fn path(&self) -> String {
         format!(
             "savingsPlan/v1.0/aws/{}/{}/{}/{}",

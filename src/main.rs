@@ -4,8 +4,11 @@ mod util;
 
 use crate::api::aws::ec2::Ec2Client;
 use crate::api::aws::elasticache::ElasticacheClient;
-use crate::api::aws::price_bulk::PriceBulkClient;
+use crate::api::aws::price_bulk::{
+    PricingListClient, RegionIndexClient, SavingsPlanListClient, ServiceIndexClient,
+};
 use crate::api::aws::price_bulk_types::{PriceBulkOffer, PriceBulkSavingsPlan};
+use crate::cache::FileBackedCacheable;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser, Debug, Clone)]
@@ -53,24 +56,28 @@ pub enum TestCommands {
 
 async fn main_test_command(cmd: &TestCommands) {
     let client = reqwest::Client::new();
-    let price_bulk_client = PriceBulkClient::new(client);
+    // let price_bulk_client = PriceBulkClient::new(client);
 
     match cmd {
         TestCommands::ServiceList {} => {
-            let response = price_bulk_client.get_service_list().await;
-            println!("{:?}", response);
+            let cached =
+                FileBackedCacheable::new(ServiceIndexClient::new_cacheable_arc(client, None), None);
+            println!("{:?}", cached.load(&()).await.unwrap());
         }
         TestCommands::RegionIndex { service } => {
-            let response = price_bulk_client.get_region_index(service).await;
-            println!("{:?}", response);
+            let cached =
+                FileBackedCacheable::new(RegionIndexClient::new_cacheable_arc(client, None), None);
+            println!("{:?}", cached.load(&service.to_string()).await.unwrap());
         }
         TestCommands::PricingList {
             service,
             region,
             version,
         } => {
-            let response = price_bulk_client
-                .get_pricing_list(&PriceBulkOffer {
+            let cached =
+                FileBackedCacheable::new(PricingListClient::new_cacheable_arc(client, None), None);
+            let response = cached
+                .load(&PriceBulkOffer {
                     region: region.clone(),
                     service_code: service.clone(),
                     offer_version: version.clone(),
@@ -84,11 +91,15 @@ async fn main_test_command(cmd: &TestCommands) {
             version,
             region,
         } => {
-            let response = price_bulk_client
-                .get_savings_plan_list(&PriceBulkSavingsPlan {
+            let cached = FileBackedCacheable::new(
+                SavingsPlanListClient::new_cacheable_arc(client, None),
+                None,
+            );
+            let response = cached
+                .load(&PriceBulkSavingsPlan {
+                    region: region.clone(),
                     service_code: service.clone(),
                     offer_version: version.clone(),
-                    region: region.clone(),
                     filename: "index.json".to_string(),
                 })
                 .await;
