@@ -1,6 +1,7 @@
 mod api;
 mod cache;
 mod util;
+mod transform;
 
 use crate::api::aws::ec2::Ec2Client;
 use crate::api::aws::elasticache::ElasticacheClient;
@@ -54,7 +55,7 @@ pub enum TestCommands {
     MemcachedTypeSpecificParameters,
 }
 
-async fn main_test_command(cmd: &TestCommands) {
+async fn main_test_command(cmd: &TestCommands) -> Result<(), Box<dyn std::error::Error>> {
     let client = reqwest::Client::new();
     let cacheable_builder = FileBackedCacheableBuilder::new(None, None);
 
@@ -100,8 +101,11 @@ async fn main_test_command(cmd: &TestCommands) {
                     offer_version: version.clone(),
                     filename: "index.json".to_string(),
                 })
-                .await;
-            println!("{:?}", response);
+                .await?;
+            let response = transform::aws::savings_plan::pivot(response.result);
+            for item in response {
+                println!("{:?}", item);
+            }
         }
         TestCommands::Ec2AllInstanceTypes => {
             let ec2_client = Ec2Client::new(None).await;
@@ -119,6 +123,7 @@ async fn main_test_command(cmd: &TestCommands) {
             println!("{:?}", response);
         }
     }
+    Ok(())
 }
 
 #[tokio::main]
@@ -128,7 +133,7 @@ async fn main() {
 
     match cli.command {
         Commands::Test { command } => {
-            main_test_command(&command).await;
+            println!("{:?}", main_test_command(&command).await);
         }
     }
 }
